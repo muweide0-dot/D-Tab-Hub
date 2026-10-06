@@ -29,10 +29,10 @@ Example:
   "enabled": true,
   "showInNametags": true,
   "showInPlayerList": true,
-  "kit": "overall",
+  "kit": "dtab",
   "apiUrl": "https://nexustierss-production.up.railway.app/api",
   "cacheMinutes": 10
 }
 ```
 
-Set `kit` to `overall`, `uhc`, `sword`, `mace`, `diapot`, `nethpot`, `smp`, `crystal`, `ogvanilla`, `speed`, `bow`, `diasmp`, `elytra`, `creeper`, `trident`, `axe`, `cart`, or `bed` to show that specific NexusTiers result.
+The tagger is configured for the **D Tab** kit only (`"kit": "dtab"`).
