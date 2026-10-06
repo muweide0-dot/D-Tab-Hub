@@ -3,7 +3,7 @@
 Are you tired of waiting forever to get your PvP rank verified? Or do you want reliable tier information directly in-game? Then check out **NexusTiers!**
 
 - Verified PvP tier rankings
-- Multiple competitive kits, including Overall, UHC, Sword, Mace, Diapot, NethPot, SMP, Crystal, Axe, Cart and Bed
+- One competitive kit: D Tab
 - Custom **NexusTiers Tagger** for Minecraft **1.21.11**
 - Ranks displayed above players and in the player list
 - Asynchronous lookups with a local cache

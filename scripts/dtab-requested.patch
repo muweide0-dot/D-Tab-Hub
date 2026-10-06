@@ -1,0 +1,582 @@
+--- a/docs/discord-application-requirements.txt
++++ b/docs/discord-application-requirements.txt
+@@ -248,4 +248,3 @@
+ Role IDs und Channel IDs über die bestehende Config/Environment Variables.
+ 
+ Bestehende Bot-Funktionen dürfen nicht kaputtgehen.
+-Owner-only tier reset command: /clearall with confirmation RESET ALL TIERS.
+--- a/artifacts/api-server/src/lib/nexus.ts
++++ b/artifacts/api-server/src/lib/nexus.ts
+@@ -258,7 +258,7 @@
+       {
+         id: "seed_activity_2",
+         title: "Result recorded",
+-        description: "Qloxyz_ received lt4 in D Tab.",
++        description: "Qloxyz_ received LT4.",
+         timestamp: new Date(Date.now() - 86400000 * 3).toISOString(),
+         kind: "result",
+       },
+@@ -1056,22 +1056,6 @@
+   return { removedCount: removed.length };
+ }
+ 
+-export async function clearAllPlayerTiers() {
+-  const state = await getState();
+-  const removedCount = state.results.length;
+-  const cooldownsCleared = state.cooldowns.length;
+-  state.results = [];
+-  state.cooldowns = [];
+-  addActivity(
+-    state,
+-    "All website tiers cleared",
+-    `${removedCount} results and ${cooldownsCleared} cooldowns removed by the server owner.`,
+-    "result",
+-  );
+-  await saveState(state);
+-  return { removedCount, cooldownsCleared };
+-}
+-
+ export async function setManualTiers(input: {
+   ign: string;
+   playerUsername: string;
+@@ -1110,7 +1094,7 @@
+       previousTier,
+       testerName: input.assignedBy,
+       createdAt,
+-      discordMessage: `${playerUsername}'s manual tier assignment — ${KIT_LABELS[kit as Kit]}: ${tier}`,
++      discordMessage: `${playerUsername}'s manual tier assignment — Rank Earned: ${tier.toUpperCase()}`,
+       region: "N/A",
+     };
+     state.results.unshift(result);
+@@ -1120,7 +1104,7 @@
+   addActivity(
+     state,
+     `${ign} received manual tiers`,
+-    `${results.map((result) => `${KIT_LABELS[result.kit as Kit]} ${result.tier}`).join(", ")} • assigned by ${input.assignedBy}`,
++    `${results.map((result) => result.tier.toUpperCase()).join(", ")} • assigned by ${input.assignedBy}`,
+     "result",
+   );
+   await saveState(state);
+@@ -1187,7 +1171,7 @@
+     queue.tickets.splice(ticketIndex, 1);
+     queue.lastUpdate = now();
+   }
+-  addActivity(state, `${data.ign} received ${data.tier}`, `${KIT_LABELS[kit]} result by ${data.testerName}.`, "result");
++  addActivity(state, `${data.ign} received ${data.tier.toUpperCase()}`, `Result by ${data.testerName}.`, "result");
+   await saveState(state);
+   return result;
+ }
+--- a/artifacts/api-server/src/lib/discord-bot.ts
++++ b/artifacts/api-server/src/lib/discord-bot.ts
+@@ -1,6 +1,5 @@
+ import {
+   closeQueue,
+-  clearAllPlayerTiers,
+   clearPlayerTiers,
+   completeRestriction,
+   createRestriction,
+@@ -466,30 +465,6 @@
+   ],
+ };
+ 
+-const highTierPanel = {
+-  embeds: [
+-    {
+-      title: "NexusTiers High Tickets",
+-      description: "Need a high-tier test? Select the requested tier below.",
+-      color: 0x5865f2,
+-      footer: { text: "Please provide clear and complete information." },
+-    },
+-  ],
+-  components: [
+-    {
+-      type: 1,
+-      components: [
+-        {
+-          type: 3,
+-          custom_id: "high_tier_tier",
+-          placeholder: "Select a tier",
+-          options: HIGH_TIER_TIERS.map((tier) => ({ label: tier, value: tier })),
+-        },
+-      ],
+-    },
+-  ],
+-};
+-
+ const testerInfoEmbed = {
+   title: "NexusTiers – Command-Übersicht",
+   description: "Alle verfügbaren Slash-Commands und ihre Verwendung. Commands mit Owner, Manage Server, Manage Roles oder Manage Channels sind nur für berechtigte Teammitglieder verfügbar.",
+@@ -516,13 +491,10 @@
+         "**/rules** – Serverregeln posten",
+         "**/applications** – Tester-/Staff-Bewerbungspanel posten",
+         "**/tickets** – Support-Ticketpanel posten",
+-        "**/hightickets** – High-Tier-Ticket anfordern",
+         "**/create new** – Fehlende Rollen erstellen",
+         "**/change** – Farben der NexusTiers-Rollen aktualisieren",
+-        "**/sort** – Tier-Rollen von HT1 bis LT5 sortieren",
+         "**/channels** – NexusTiers-Kanalstruktur erstellen",
+         "**/requesttest** – Test-Waitlist-Panel im request-test-Kanal posten",
+-        "**/boosteralert** – Boost-Meldechannel festlegen (nur Serverinhaber)",
+       ].join("\n"),
+       inline: false,
+     },
+@@ -540,7 +512,6 @@
+       name: "🛡️ Moderation & Tier-Verwaltung",
+       value: [
+         "**/clear minecraft:<name>** – Website-Tiers eines Spielers löschen",
+-        "**/clearall confirmation:RESET ALL TIERS** – Alle Website-Tiers löschen",
+         "**/restrict discord:<user> minecraft:<name> duration:<dauer> reason:<grund>** – Spieler einschränken",
+         "**/unrestrict discord:<user> minecraft:<name>** – Aktive Einschränkung entfernen",
+         "**/user set minecraft:<name> discord:<name> tiers:<kit:tier>** – Tiers manuell setzen (z. B. dtab:lt4)",
+@@ -978,71 +949,6 @@
+   return (await response.json()) as DiscordRole[];
+ }
+ 
+-const TIER_ROLE_SORT_ORDER = ["ht1", "lt1", "ht2", "lt2", "ht3", "lt3", "ht4", "lt4", "ht5", "lt5"] as const;
+-
+-async function sortTierRoles(guildId: string, botUserId: string) {
+-  const [roles, botMemberResponse] = await Promise.all([
+-    getGuildRoles(guildId),
+-    rest(`/guilds/${guildId}/members/${botUserId}`),
+-  ]);
+-  if (!botMemberResponse.ok) {
+-    throw new Error(`Could not read the bot's role hierarchy: ${botMemberResponse.status}`);
+-  }
+-
+-  const botMember = (await botMemberResponse.json()) as DiscordGuildMember;
+-  const botRolePositions = roles
+-    .filter((role) => botMember.roles?.includes(role.id) && typeof role.position === "number")
+-    .map((role) => role.position as number);
+-  if (botRolePositions.length === 0) {
+-    throw new Error("Could not determine the bot's highest server role.");
+-  }
+-  const botHighestRolePosition = Math.max(...botRolePositions);
+-
+-  const tierRoles = roles.flatMap((role) => {
+-    const match = role.name.trim().match(/^\[?(ht[1-5]|lt[1-5])\]?(?=\s|$)/i);
+-    return match
+-      ? [{ role, tier: match[1].toLowerCase() as (typeof TIER_ROLE_SORT_ORDER)[number] }]
+-      : [];
+-  });
+-  const sortableRoles = tierRoles
+-    .filter(
+-      ({ role }) =>
+-        !role.managed &&
+-        role.id !== guildId &&
+-        typeof role.position === "number" &&
+-        role.position < botHighestRolePosition,
+-    )
+-    .sort(
+-      (a, b) =>
+-        TIER_ROLE_SORT_ORDER.indexOf(a.tier) - TIER_ROLE_SORT_ORDER.indexOf(b.tier) ||
+-        a.role.name.toLowerCase().localeCompare(b.role.name.toLowerCase()) ||
+-        a.role.id.localeCompare(b.role.id),
+-    );
+-
+-  const updates = sortableRoles.map(({ role }, index) => ({
+-    id: role.id,
+-    position: botHighestRolePosition - index - 1,
+-  }));
+-  const changedUpdates = updates.filter(
+-    (update) => roles.find((role) => role.id === update.id)?.position !== update.position,
+-  );
+-  if (changedUpdates.length > 0) {
+-    const response = await rest(`/guilds/${guildId}/roles`, {
+-      method: "PATCH",
+-      body: JSON.stringify(changedUpdates),
+-    });
+-    if (!response.ok) {
+-      throw new Error(`Could not sort tier roles: ${response.status} ${await response.text()}`);
+-    }
+-  }
+-
+-  return {
+-    found: tierRoles.length,
+-    sorted: sortableRoles.length,
+-    skipped: tierRoles.length - sortableRoles.length,
+-  };
+-}
+-
+ type NexusRoleSpec = {
+   name: string;
+   color: number;
+@@ -2315,90 +2221,6 @@
+   );
+ }
+ 
+-async function getCurrentGuildBoosts(guildId: string) {
+-  const activeBoosts: Record<string, string> = {};
+-  let after: string | undefined;
+-
+-  while (true) {
+-    const query = new URLSearchParams({ limit: "1000" });
+-    if (after) query.set("after", after);
+-
+-    const response = await rest(`/guilds/${guildId}/members?${query.toString()}`);
+-    if (!response.ok) {
+-      throw new Error(`Could not sync current server boosters: ${response.status}`);
+-    }
+-
+-    const members = (await response.json()) as DiscordGuildMember[];
+-    for (const member of members) {
+-      const userId = member.user?.id;
+-      if (userId && member.premium_since) activeBoosts[userId] = member.premium_since;
+-    }
+-
+-    if (members.length < 1000) return activeBoosts;
+-    const nextAfter = members[members.length - 1]?.user?.id;
+-    if (!nextAfter || nextAfter === after) return activeBoosts;
+-    after = nextAfter;
+-  }
+-}
+-
+-async function setBoosterAlertChannel(interaction: DiscordInteraction, botUserId?: string) {
+-  const guildId = interaction.guild_id;
+-  if (!guildId) {
+-    await respond(interaction, "Dieser Befehl kann nur in einem Server verwendet werden.", true);
+-    return;
+-  }
+-
+-  if ((await getGuildOwnerId(guildId)) !== actor(interaction).id) {
+-    await respond(interaction, "Nur der Serverinhaber darf `/boosteralert` verwenden.", true);
+-    return;
+-  }
+-
+-  const channelId = interaction.channel_id?.trim();
+-  if (!channelId) throw new Error("Führe `/boosteralert` in einem Textkanal dieses Servers aus.");
+-  const channel = await getChannel(channelId);
+-  if (channel.type !== 0 || channel.guild_id !== guildId) {
+-    throw new Error("Führe `/boosteralert` in einem normalen Textkanal dieses Servers aus.");
+-  }
+-  if (!botUserId) throw new Error("Der Bot ist noch nicht bereit. Bitte versuche es gleich noch einmal.");
+-
+-  await deferResponse(interaction, true);
+-  const state = await getState();
+-  state.boosterAlertChannels ??= {};
+-  state.boosterAlertBoosts ??= {};
+-  state.boosterAlertChannels[guildId] = channelId;
+-  state.boosterAlertBoosts[guildId] ??= {};
+-  await saveState(state);
+-
+-  let syncedExistingBoosts = false;
+-  try {
+-    const currentBoosts = await getCurrentGuildBoosts(guildId);
+-    state.boosterAlertBoosts[guildId] = {
+-      ...state.boosterAlertBoosts[guildId],
+-      ...currentBoosts,
+-    };
+-    await saveState(state);
+-    syncedExistingBoosts = true;
+-  } catch (error) {
+-    logger.warn({ error, guildId }, "Could not prime active boosters for boost alerts");
+-  }
+-
+-  let canPostInChannel = true;
+-  try {
+-    await postToChannel(channelId, "✅ Boost-Benachrichtigungen sind ab jetzt in diesem Channel aktiv.");
+-  } catch (error) {
+-    canPostInChannel = false;
+-    logger.warn({ error, guildId, channelId }, "Could not post boost-alert setup confirmation");
+-  }
+-
+-  const status = canPostInChannel
+-    ? `Boost-Alert ist jetzt in <#${channelId}> aktiv.`
+-    : `Der Channel <#${channelId}> ist gespeichert, aber der Bot kann dort nicht schreiben. Gib ihm die Berechtigung „Nachrichten senden“.`;
+-  const syncStatus = syncedExistingBoosts
+-    ? " Bereits aktive Booster wurden übernommen und lösen keine nachträgliche Meldung aus."
+-    : " Aktive Booster konnten nicht abgeglichen werden; neue Boosts werden trotzdem gemeldet.";
+-  await editDeferredResponse(botUserId, interaction, `${status}${syncStatus}`);
+-}
+-
+ function findSubcommand(options: DiscordOption[] | undefined): string | undefined {
+   for (const item of options ?? []) {
+     if (
+@@ -2643,10 +2465,6 @@
+       description: "Post the NexusTiers support ticket panel",
+     },
+     {
+-      name: "hightickets",
+-      description: "Request a private High Tier ticket",
+-    },
+-    {
+       name: "create",
+       description: "Create missing NexusTiers roles",
+       options: [
+@@ -2662,10 +2480,6 @@
+       description: "Change the colors of NexusTiers roles",
+     },
+     {
+-      name: "sort",
+-      description: "Sort all tier roles from HT1 to LT5",
+-    },
+-    {
+       name: "channels",
+       description: "Create the emoji channel layout shown in the setup screenshots",
+     },
+@@ -2696,20 +2510,11 @@
+       ],
+     },
+     {
+-      name: "boosteralert",
+-      description: "Owner-only: set this channel for server boost notifications",
+-    },
+-    {
+       name: "clear",
+       description: "Clear all website tiers for a Minecraft user",
+       options: [{ name: "minecraft", description: "Minecraft username whose tiers should be removed", type: 3, required: true }],
+     },
+     {
+-      name: "clearall",
+-      description: "Owner-only: clear all website tiers",
+-      options: [{ name: "confirmation", description: "Type RESET ALL TIERS to confirm", type: 3, required: true }],
+-    },
+-    {
+       name: "restrict",
+       description: "Restrict a Discord and Minecraft user",
+       options: [
+@@ -2884,57 +2689,6 @@
+   return targetChannelId;
+ }
+ 
+-async function postHighTierPanel(guildId: string) {
+-  const category = await findOrCreateTicketCategory(guildId, "high_tier");
+-  const response = await rest(`/guilds/${guildId}/channels`);
+-  if (!response.ok) throw new Error(`Could not read Discord channels: ${response.status}`);
+-  const channels = (await response.json()) as Array<{
+-    id: string;
+-    name?: string;
+-    type?: number;
+-    parent_id?: string | null;
+-  }>;
+-  const configuredChannelId = process.env.HIGH_TIER_PANEL_CHANNEL_ID?.trim();
+-  const configuredChannel = configuredChannelId
+-    ? channels.find(
+-        (channel) =>
+-          channel.id === configuredChannelId &&
+-          channel.type === 0 &&
+-          channel.parent_id === category.id,
+-      )
+-    : undefined;
+-  const existingPanelChannel =
+-    configuredChannel ??
+-    channels.find(
+-      (channel) =>
+-        channel.type === 0 &&
+-        channel.parent_id === category.id &&
+-        (channel.name === "high-tickets" || channel.name === "high-tier-tickets"),
+-    );
+-  let panelChannel = existingPanelChannel;
+-  if (!panelChannel) {
+-    const createChannelResponse = await rest(`/guilds/${guildId}/channels`, {
+-      method: "POST",
+-      body: JSON.stringify({
+-        name: "high-tickets",
+-        type: 0,
+-        parent_id: category.id,
+-      }),
+-    });
+-    if (!createChannelResponse.ok) {
+-      throw new Error(`Could not create the High Tickets panel channel: ${createChannelResponse.status}`);
+-    }
+-    panelChannel = (await createChannelResponse.json()) as {
+-      id: string;
+-      name?: string;
+-      type?: number;
+-      parent_id?: string | null;
+-    };
+-  }
+-  await postToChannel(panelChannel.id, "", highTierPanel);
+-  return panelChannel.id;
+-}
+-
+ function highTierSelectionRow(
+   customId: string,
+   placeholder: string,
+@@ -3431,10 +3185,6 @@
+       await setApplicationChannel(interaction, name === "applicationstaff" ? "staff" : "tester");
+       return;
+     }
+-    if (name === "boosteralert") {
+-      await setBoosterAlertChannel(interaction, botUserId);
+-      return;
+-    }
+     if (name === "applications") {
+       if (!interaction.guild_id) {
+         await respond(interaction, "This command can only be used in a server.", true);
+@@ -3522,19 +3272,6 @@
+       );
+       return;
+     }
+-    if (name === "hightickets") {
+-      if (!interaction.guild_id) {
+-        await respond(interaction, "This command can only be used in a server.", true);
+-        return;
+-      }
+-      if ((await getGuildOwnerId(interaction.guild_id)) !== user.id) {
+-        await respond(interaction, "You do not have permission to use this command.", true);
+-        return;
+-      }
+-      const panelChannelId = await postHighTierPanel(interaction.guild_id);
+-      await respond(interaction, `High Tier panel posted in <#${panelChannelId}>.`, true);
+-      return;
+-    }
+     if (name === "create") {
+       if (!interaction.guild_id) {
+         await respond(interaction, "This command can only be used in a server.", true);
+@@ -3592,61 +3329,6 @@
+       );
+       return;
+     }
+-    if (name === "sort") {
+-      if (!interaction.guild_id) {
+-        await respond(interaction, "Dieser Befehl kann nur in einem Server verwendet werden.", true);
+-        return;
+-      }
+-      const guildOwnerId = await getGuildOwnerId(interaction.guild_id);
+-      if (!hasManageRolesPermission(interaction) && guildOwnerId !== user.id) {
+-        await respond(interaction, "Du brauchst die Berechtigung **Rollen verwalten**, um `/sort` zu verwenden.", true);
+-        return;
+-      }
+-      if (!botUserId) {
+-        throw new Error("Der Bot ist noch nicht bereit, Rollen zu sortieren. Bitte versuche es gleich noch einmal.");
+-      }
+-
+-      await deferResponse(interaction, true);
+-      const summary = await sortTierRoles(interaction.guild_id, botUserId);
+-      if (summary.found === 0) {
+-        await editDeferredResponse(botUserId, interaction, "Keine Tier-Rollen mit einem Präfix von HT1 bis LT5 gefunden.");
+-        return;
+-      }
+-      const skippedNote = summary.skipped > 0
+-        ? `; **${summary.skipped}** wegen verwalteter Rollen oder der Discord-Rollenhierarchie übersprungen`
+-        : "";
+-      await editDeferredResponse(
+-        botUserId,
+-        interaction,
+-        `Tier-Rollen über alle Kits sortiert: **HT1 → LT1 → HT2 → LT2 → HT3 → LT3 → HT4 → LT4 → HT5 → LT5**. **${summary.sorted}** Rollen oben angeordnet${skippedNote}.`,
+-      );
+-      return;
+-    }
+-    if (name === "clearall") {
+-      if (!interaction.guild_id) {
+-        await respond(interaction, "This command can only be used in a server.", true);
+-        return;
+-      }
+-      const guildResponse = await rest(`/guilds/${interaction.guild_id}`);
+-      if (!guildResponse.ok) throw new Error(`Could not verify the server owner: ${guildResponse.status}`);
+-      const guild = (await guildResponse.json()) as { owner_id: string };
+-      if (guild.owner_id !== user.id) {
+-        await respond(interaction, "Only the server owner can clear all website tiers.", true);
+-        return;
+-      }
+-      const confirmation = String(requiredOption(interaction, "confirmation")).trim();
+-      if (confirmation !== "RESET ALL TIERS") {
+-        await respond(interaction, "Reset cancelled. Type exactly `RESET ALL TIERS` to confirm.", true);
+-        return;
+-      }
+-      const cleared = await clearAllPlayerTiers();
+-      await respond(
+-        interaction,
+-        `All website tiers were cleared: **${cleared.removedCount}** results and **${cleared.cooldownsCleared}** cooldowns removed.`,
+-        true,
+-      );
+-      return;
+-    }
+     if (name === "clear") {
+       if (!interaction.guild_id) {
+         await respond(interaction, "This command can only be used in a server.", true);
+@@ -4141,7 +3823,6 @@
+                     { name: "Username", value: result.ign },
+                     { name: "Previous Rank", value: result.previousTier || "N/A" },
+                     { name: "Rank Earned", value: result.tier.toUpperCase() },
+-                    { name: "Gamemode", value: KIT_LABELS[kit as keyof typeof KIT_LABELS] },
+                   ],
+                   footer: { text: "NexusTiers Test Results" },
+                 },
+@@ -4171,7 +3852,7 @@
+         const panel = queuePanels.get(`${interaction.guild_id}:${kit}`);
+         if (panel) await updateQueuePanel(panel).catch((error) => logger.warn({ error }, "Could not refresh queue panel after result"));
+       }
+-      await respond(interaction, `Result saved: **${result.ign}** earned **${result.tier}** in **${kit}**. The player and tester were mentioned in the result post.`);
++      await respond(interaction, `Result saved: **${result.ign}** earned **${result.tier.toUpperCase()}**. The player and tester were mentioned in the result post.`);
+       return;
+     }
+     await respond(interaction, "Unknown NexusTiers command.", true);
+--- a/artifacts/minecraft-queue/src/App.tsx
++++ b/artifacts/minecraft-queue/src/App.tsx
+@@ -105,19 +105,19 @@
+ 
+ function Header() {
+   return <header className="topbar">
+-    <Link href="/" className="brand" data-testid="link-home"><span className="brand-mark"><PixelIcon name="crosshair" size={18} /></span><span><b className="text-sky">Nexus</b>Tiers</span></Link>
++    <Link href="/" className="brand" data-testid="link-home"><span className="brand-mark"><PixelIcon name="crosshair" size={18} /></span><span><b className="text-sky">D Tab</b> Hub</span></Link>
+     <nav className="topnav" aria-label="Primary navigation">
+       <Link href="/" className="topnav-link" data-testid="link-leaderboard">Leaderboard</Link>
+       <Link href="/queue/dtab" className="topnav-link" data-testid="link-queue">D Tab queue</Link>
+       <Link href="/admin" className="topnav-link topnav-muted" data-testid="link-admin">Tester ops</Link>
+     </nav>
+-    <div className="server-state" data-testid="status-server"><span className="status-dot" /> LIVE <span className="server-ip">nexustiers.gg</span></div>
++    <div className="server-state" data-testid="status-server"><span className="status-dot" /> LIVE</div>
+   </header>;
+ }
+ 
+ function SiteFrame({ children, mode = '' }: { children: ReactNode; mode?: string }) {
+   const { data, isLoading } = useHealthCheck({ query: { queryKey: ['/api/healthz'], staleTime: 30000 } });
+-  return <div className={`noise site-shell min-h-[100dvh] ${mode}`}><div className="hero-grid pointer-events-none absolute inset-x-0 top-0 h-[460px]" /><Header /><div className="relative z-10 mx-auto max-w-[1240px] px-5 pb-16 sm:px-8">{children}<footer className="site-footer"><span>NEXUSTIERS // COMPETITIVE LADDER</span><span data-testid="status-api">{isLoading ? 'CONNECTING TO API' : data?.status === 'ok' ? 'API ONLINE' : 'QUEUE NETWORK READY'}</span></footer></div></div>;
++  return <div className={`noise site-shell min-h-[100dvh] ${mode}`}><div className="hero-grid pointer-events-none absolute inset-x-0 top-0 h-[460px]" /><Header /><div className="relative z-10 mx-auto max-w-[1240px] px-5 pb-16 sm:px-8">{children}<footer className="site-footer"><span>D TAB HUB // COMPETITIVE LADDER</span><span data-testid="status-api">{isLoading ? 'CONNECTING TO API' : data?.status === 'ok' ? 'API ONLINE' : 'QUEUE NETWORK READY'}</span></footer></div></div>;
+ }
+ 
+ function tierOrder(tier: string) {
+@@ -156,7 +156,7 @@
+     <div className="hero-grid pointer-events-none absolute inset-x-0 top-0 h-[420px]" />
+     <main className="relative z-10 mx-auto max-w-[1240px] px-5 pb-16 pt-8 sm:px-8 sm:pt-12">
+       <section className="animate-rise-in reference-leaderboard-intro">
+-        <div className="reference-brand"><span>Nexus</span><b>Tiers</b></div>
++        <div className="reference-brand"><span>D Tab</span><b>Hub</b></div>
+         <div className="reference-search-wrap">
+           <span className="reference-search-icon"><PixelIcon name="search" size={16} /></span>
+           <input data-testid="input-player-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search players" aria-label="Search players" className="reference-search" />
+--- a/artifacts/minecraft-queue/index.html
++++ b/artifacts/minecraft-queue/index.html
+@@ -3,15 +3,15 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+-    <title>NexusTiers Leaderboard</title>
+-    <meta name="description" content="NexusTiers Leaderboard — built on Replit. Update this description to reflect the app." />
++    <title>D Tab Hub — D Tab Rankings</title>
++    <meta name="description" content="D Tab Hub — D Tab competitive rankings, player profiles, and tester queues." />
+     <meta name="robots" content="index, follow" />
+-    <meta property="og:title" content="NexusTiers Leaderboard" />
+-    <meta property="og:description" content="NexusTiers Leaderboard — built on Replit. Update this description to reflect the app." />
++    <meta property="og:title" content="D Tab Hub — D Tab Rankings" />
++    <meta property="og:description" content="D Tab Hub — D Tab competitive rankings, player profiles, and tester queues." />
+     <meta property="og:type" content="website" />
+     <meta name="twitter:card" content="summary_large_image" />
+-    <meta name="twitter:title" content="NexusTiers Leaderboard" />
+-    <meta name="twitter:description" content="NexusTiers Leaderboard — built on Replit. Update this description to reflect the app." />
++    <meta name="twitter:title" content="D Tab Hub — D Tab Rankings" />
++    <meta name="twitter:description" content="D Tab Hub — D Tab competitive rankings, player profiles, and tester queues." />
+     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+     <link rel="preconnect" href="https://fonts.googleapis.com">
+     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+--- a/artifacts/minecraft-queue/src/index.css
++++ b/artifacts/minecraft-queue/src/index.css
+@@ -339,7 +339,7 @@
+   }
+ }
+ 
+-/* NexusTiers visual language: slate server chrome, pixel typography, crisp competitive surfaces. */
++/* D Tab Hub visual language: slate server chrome, pixel typography, crisp competitive surfaces. */
+ html, body, #root { min-height: 100%; }
+ body { min-width: 320px; background: #0b1118; color: #e7eef3; }
+ a { color: inherit; text-decoration: none; }
+@@ -544,7 +544,7 @@
+ @media (max-width:420px) { .profile-close{right:25px} }
+ @media (max-width:360px) { .profile-identity{padding-inline:24px}.profile-position,.profile-tiers{padding-inline:24px}.position-box{grid-template-columns:70px minmax(0,1fr) 52px}.position-box>strong{padding-left:8px;font-size:28px}.position-label{font-size:13px}.position-label svg{width:18px;height:18px}.position-box small{font-size:11px}.profile-identity h1{font-size:29px} }
+ 
+-/* Reference ZIP homepage: purple NexusTiers surface and deliberately minimal chrome. */
++/* Reference ZIP homepage: purple D Tab Hub surface and deliberately minimal chrome. */
+ .reference-leaderboard {
+   background:
+     radial-gradient(circle at 76% -8%, rgba(126, 73, 220, .24), transparent 32rem),
