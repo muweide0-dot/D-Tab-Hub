@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "nexus-tier-tagger",
+  "version": "${version}",
+  "name": "NexusTiers Tagger",
+  "description": "Displays verified NexusTiers ranks above players and in the player list.",
+  "authors": ["NexusTiers"],
+  "contact": {
+    "sources": "https://github.com/muweide0-dot/NexusTierss"
+  },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "gg.nexustiers.tiertagger.NexusTierTagger"
+    ]
+  },
+  "mixins": [
+    "nexus-tier-tagger.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.18.2",
+    "minecraft": "1.21.11",
+    "fabric-api": "*"
+  }
+}

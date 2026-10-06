@@ -1,0 +1,12 @@
+[phases.build]
+cmds = [
+  "pnpm run typecheck:libs",
+  "PORT=4173 BASE_PATH=/ pnpm --filter @workspace/minecraft-queue run build",
+  "pnpm --filter @workspace/api-server run build"
+]
+
+[start]
+cmd = "node --enable-source-maps artifacts/api-server/dist/index.mjs"
+
+[variables]
+NODE_ENV = "production"

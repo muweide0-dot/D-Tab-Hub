@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "gg.nexustiers.tiertagger.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "MixinPlayer"
+  ],
+  "client": [
+    "MixinPlayerTabOverlay"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
